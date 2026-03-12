@@ -475,7 +475,7 @@ The container listens on `0.0.0.0:8000` by default. If exposing publicly, place 
 
 For server or NAS environments where Joplin runs headlessly via
 [joplin-terminal-data-api](https://github.com/RickoNoNo3/joplin-terminal-data-api)
-rather than the desktop app, a `docker-compose.yml` is provided.
+rather than the desktop app, a `docker-compose.headless.yml` is provided.
 
 **Step 1 — configure**:
 ```bash
@@ -486,7 +486,7 @@ cp .env.example .env
 
 **Step 2 — start**:
 ```bash
-docker compose up -d
+docker compose -f docker-compose.headless.yml up -d
 ```
 
 `joplin-terminal-data-api` handles Joplin authentication transparently on port
