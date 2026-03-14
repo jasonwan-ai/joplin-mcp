@@ -32,6 +32,17 @@ services:
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8000
       - MCP_LOG_LEVEL=${MCP_LOG_LEVEL:-info}
+      - QDRANT_BASE_URL=http://qdrant:6333
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - EMBED_MODEL=bge-m3:latest
+      - QDRANT_COLLECTION=joplin_notes
+    networks:
+      - default
+      - ai_backend
     # Uncomment to mount a config file for fine-grained tool control:
     # volumes:
     #   - ./joplin-mcp.json:/config/joplin-mcp.json:ro
+
+networks:
+  ai_backend:
+    external: true
