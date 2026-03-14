@@ -1,10 +1,9 @@
 """Tests for tools/brain_dump.py"""
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 import pytest
 
 
 def _get_tool_fn(tool):
-    """Unwrap FastMCP tool decorator to get underlying function."""
     if hasattr(tool, "fn"):
         return tool.fn
     return tool
@@ -14,24 +13,20 @@ def _get_tool_fn(tool):
 
 class TestGetNotebookTree:
     @pytest.mark.asyncio
-    @patch("joplin_mcp.tools.brain_dump.get_joplin_client")
-    async def test_returns_indented_tree(self, mock_get_client):
+    @patch("joplin_mcp.tools.brain_dump._get_all_notebooks")
+    async def test_returns_indented_tree(self, mock_get_nbs):
         from joplin_mcp.tools.brain_dump import get_notebook_tree
 
-        mock_notebooks = [
-            MagicMock(id="root1", title="Music", parent_id=None),
-            MagicMock(id="child1", title="FL Studio", parent_id="root1"),
-            MagicMock(id="child2", title="Choir", parent_id="root1"),
-            MagicMock(id="grandchild1", title="Projects", parent_id="child1"),
-            MagicMock(id="root2", title="Work", parent_id=None),
+        mock_get_nbs.return_value = [
+            {"id": "root1", "title": "Music", "parent_id": ""},
+            {"id": "child1", "title": "FL Studio", "parent_id": "root1"},
+            {"id": "child2", "title": "Choir", "parent_id": "root1"},
+            {"id": "grandchild1", "title": "Projects", "parent_id": "child1"},
+            {"id": "root2", "title": "Work", "parent_id": ""},
         ]
-        mock_client = MagicMock()
-        mock_client.get_all_notebooks.return_value = mock_notebooks
-        mock_get_client.return_value = mock_client
 
         fn = _get_tool_fn(get_notebook_tree)
         result = await fn()
-
         lines = result.split("\n")
         assert "Music" in lines
         assert "  FL Studio" in lines
@@ -40,32 +35,25 @@ class TestGetNotebookTree:
         assert "Work" in lines
 
     @pytest.mark.asyncio
-    @patch("joplin_mcp.tools.brain_dump.get_joplin_client")
-    async def test_returns_message_when_no_notebooks(self, mock_get_client):
+    @patch("joplin_mcp.tools.brain_dump._get_all_notebooks")
+    async def test_returns_message_when_no_notebooks(self, mock_get_nbs):
         from joplin_mcp.tools.brain_dump import get_notebook_tree
 
-        mock_client = MagicMock()
-        mock_client.get_all_notebooks.return_value = []
-        mock_get_client.return_value = mock_client
-
+        mock_get_nbs.return_value = []
         fn = _get_tool_fn(get_notebook_tree)
         result = await fn()
         assert "No notebooks found" in result
 
     @pytest.mark.asyncio
-    @patch("joplin_mcp.tools.brain_dump.get_joplin_client")
-    async def test_children_sorted_alphabetically(self, mock_get_client):
+    @patch("joplin_mcp.tools.brain_dump._get_all_notebooks")
+    async def test_children_sorted_alphabetically(self, mock_get_nbs):
         from joplin_mcp.tools.brain_dump import get_notebook_tree
 
-        mock_notebooks = [
-            MagicMock(id="root", title="Music", parent_id=None),
-            MagicMock(id="c2", title="Violin", parent_id="root"),
-            MagicMock(id="c1", title="Choir", parent_id="root"),
+        mock_get_nbs.return_value = [
+            {"id": "root", "title": "Music", "parent_id": ""},
+            {"id": "c2", "title": "Violin", "parent_id": "root"},
+            {"id": "c1", "title": "Choir", "parent_id": "root"},
         ]
-        mock_client = MagicMock()
-        mock_client.get_all_notebooks.return_value = mock_notebooks
-        mock_get_client.return_value = mock_client
-
         fn = _get_tool_fn(get_notebook_tree)
         result = await fn()
         lines = result.split("\n")
@@ -130,32 +118,24 @@ class TestSemanticSearch:
 class TestCreateAndEmbedNote:
     @pytest.mark.asyncio
     @patch("joplin_mcp.tools.brain_dump.get_vector_service")
-    @patch("joplin_mcp.tools.brain_dump.get_joplin_client")
-    @patch("joplin_mcp.tools.brain_dump.get_notebook_id_by_name")
-    @patch("joplin_mcp.tools.brain_dump.get_notebook_map_cached")
-    @patch("joplin_mcp.tools.brain_dump._compute_notebook_path")
-    async def test_creates_note_and_embeds(
-        self, mock_compute_path, mock_get_map, mock_get_id, mock_get_client, mock_get_service
-    ):
+    @patch("joplin_mcp.tools.brain_dump._joplin_post")
+    @patch("joplin_mcp.tools.brain_dump._get_all_notebooks")
+    async def test_creates_note_and_embeds(self, mock_get_nbs, mock_post, mock_get_service):
         from joplin_mcp.tools.brain_dump import create_and_embed_note
 
-        mock_get_id.return_value = "folder_id_123"
-        mock_client = MagicMock()
-        mock_client.add_note.return_value = "new_note_id_456"
-        mock_get_client.return_value = mock_client
-        mock_get_map.return_value = {}
-        mock_compute_path.return_value = "Music/FL Studio/Ideas"
+        mock_get_nbs.return_value = [
+            {"id": "nb1", "title": "Music", "parent_id": ""},
+            {"id": "nb2", "title": "FL Studio", "parent_id": "nb1"},
+            {"id": "nb3", "title": "Ideas", "parent_id": "nb2"},
+        ]
+        mock_post.return_value = {"id": "new_note_id_456"}
         mock_service = MagicMock()
         mock_get_service.return_value = mock_service
 
         fn = _get_tool_fn(create_and_embed_note)
         result = await fn(title="FL Studio reverb ideas", notebook_path="Music/FL Studio/Ideas", body="Some content")
 
-        mock_client.add_note.assert_called_once_with(
-            title="FL Studio reverb ideas",
-            body="Some content",
-            parent_id="folder_id_123",
-        )
+        mock_post.assert_called_once_with("/notes", {"title": "FL Studio reverb ideas", "body": "Some content", "parent_id": "nb3"})
         mock_service.upsert_note.assert_called_once()
         upsert_kwargs = mock_service.upsert_note.call_args[1]
         assert upsert_kwargs["note_id"] == "new_note_id_456"
@@ -164,11 +144,11 @@ class TestCreateAndEmbedNote:
         assert "new_note_id_456" in result
 
     @pytest.mark.asyncio
-    @patch("joplin_mcp.tools.brain_dump.get_notebook_id_by_name")
-    async def test_returns_error_when_notebook_not_found(self, mock_get_id):
+    @patch("joplin_mcp.tools.brain_dump._get_all_notebooks")
+    async def test_returns_error_when_notebook_not_found(self, mock_get_nbs):
         from joplin_mcp.tools.brain_dump import create_and_embed_note
 
-        mock_get_id.side_effect = Exception("Notebook not found")
+        mock_get_nbs.return_value = []
 
         fn = _get_tool_fn(create_and_embed_note)
         result = await fn(title="Test", notebook_path="Nonexistent/Path", body="body")
@@ -177,22 +157,13 @@ class TestCreateAndEmbedNote:
 
     @pytest.mark.asyncio
     @patch("joplin_mcp.tools.brain_dump.get_vector_service")
-    @patch("joplin_mcp.tools.brain_dump.get_joplin_client")
-    @patch("joplin_mcp.tools.brain_dump.get_notebook_id_by_name")
-    @patch("joplin_mcp.tools.brain_dump.get_notebook_map_cached")
-    @patch("joplin_mcp.tools.brain_dump._compute_notebook_path")
-    async def test_note_saved_even_if_qdrant_fails(
-        self, mock_compute_path, mock_get_map, mock_get_id, mock_get_client, mock_get_service
-    ):
-        """Joplin write must succeed even if Qdrant upsert fails."""
+    @patch("joplin_mcp.tools.brain_dump._joplin_post")
+    @patch("joplin_mcp.tools.brain_dump._get_all_notebooks")
+    async def test_note_saved_even_if_qdrant_fails(self, mock_get_nbs, mock_post, mock_get_service):
         from joplin_mcp.tools.brain_dump import create_and_embed_note
 
-        mock_get_id.return_value = "folder_id"
-        mock_client = MagicMock()
-        mock_client.add_note.return_value = "note_id"
-        mock_get_client.return_value = mock_client
-        mock_get_map.return_value = {}
-        mock_compute_path.return_value = "Music"
+        mock_get_nbs.return_value = [{"id": "nb1", "title": "Music", "parent_id": ""}]
+        mock_post.return_value = {"id": "note_id"}
         mock_service = MagicMock()
         mock_service.upsert_note.side_effect = Exception("Qdrant is down")
         mock_get_service.return_value = mock_service
@@ -200,7 +171,5 @@ class TestCreateAndEmbedNote:
         fn = _get_tool_fn(create_and_embed_note)
         result = await fn(title="Test note", notebook_path="Music", body="body")
 
-        # Note was saved
-        mock_client.add_note.assert_called_once()
-        # Result indicates success (upsert failure is silent)
+        mock_post.assert_called_once()
         assert "note_id" in result
