@@ -13,25 +13,36 @@
 
 services:
   joplin-mcp:
+    container_name: joplin-mcp
     build: .
     restart: unless-stopped
     ports:
       - "${MCP_PORT:-8000}:8000"
     environment:
-      # joplin-terminal-data-api injects the real auth token automatically.
-      # A non-empty placeholder is required here only to satisfy joplin-mcp's
-      # startup validation; it is not used for actual Joplin authentication.
+      # joplin-data-api container is on ai_backend network — use its Docker DNS name.
+      # The data-api's nginx at :41185 auto-injects the real token, so we connect
+      # directly via container name. Token must be non-empty for joplin-mcp validation;
+      # the real token is injected by nginx before hitting joplin's Data API.
       - JOPLIN_TOKEN=${JOPLIN_TOKEN:-auto_injected}
-      # Linux: use the Docker bridge gateway to reach host-exposed ports.
-      # macOS / Windows Docker Desktop: use host.docker.internal instead.
-      - JOPLIN_HOST=${JOPLIN_HOST:-172.17.0.1}
-      # Default matches joplin-terminal-data-api's exposed port (41185).
-      # Change to 41184 if connecting to a Joplin Desktop instance on the host.
+      # Connect via Docker service name (joplin-data-api is on ai_backend network).
+      - JOPLIN_HOST=${JOPLIN_HOST:-joplin-data-api}
+      # Default matches joplin-terminal-data-api's nginx port (41185).
       - JOPLIN_PORT=${JOPLIN_PORT:-41185}
       - MCP_TRANSPORT=http
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8000
       - MCP_LOG_LEVEL=${MCP_LOG_LEVEL:-info}
+      - QDRANT_BASE_URL=http://qdrant:6333
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - EMBED_MODEL=bge-m3:latest
+      - QDRANT_COLLECTION=joplin_notes
+    networks:
+      - default
+      - ai_backend
     # Uncomment to mount a config file for fine-grained tool control:
     # volumes:
     #   - ./joplin-mcp.json:/config/joplin-mcp.json:ro
+
+networks:
+  ai_backend:
+    external: true
