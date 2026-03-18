@@ -783,6 +783,54 @@ async def update_note(
     return format_update_success(ItemType.note, note_id)
 
 
+@create_tool("move_note", "Move note to notebook")
+async def move_note(
+    note_id: Annotated[JoplinIdType, Field(description="Note ID to move")],
+    notebook_name: Annotated[
+        RequiredStringType,
+        Field(
+            description=(
+                "Destination notebook name or hierarchical path. "
+                "Use a plain name for top-level (e.g. 'Work') or "
+                "a '/'-separated path for nested notebooks "
+                "(e.g. 'Projects/Active/Tasks')."
+            )
+        ),
+    ],
+) -> str:
+    """Move a note to a different notebook/folder.
+
+    Resolves the destination notebook by name or hierarchical path, then moves
+    the note by updating its parent folder.
+
+    Returns:
+        str: Confirmation with note title and destination folder path.
+
+    Raises:
+        ValueError: If the destination notebook is not found.
+
+    Examples:
+        - move_note("note_id_123", "Work") - Move to top-level 'Work' notebook
+        - move_note("note_id_123", "Projects/Active") - Move to nested notebook
+    """
+    folder_id = get_notebook_id_by_name(notebook_name)
+    nb_map = get_notebook_map_cached()
+    full_path = _compute_notebook_path(folder_id, nb_map)
+
+    client = get_joplin_client()
+    note = client.get_note(note_id, fields="id,title")
+    client.modify_note(note_id, parent_id=folder_id)
+    _clear_note_cache()
+
+    return (
+        f"MOVE_NOTE: SUCCESS\n"
+        f"  Note:        {note.title}\n"
+        f"  Note ID:     {note_id}\n"
+        f"  Destination: {full_path}\n"
+        f"  Folder ID:   {folder_id}"
+    )
+
+
 @create_tool("edit_note", "Edit note")
 async def edit_note(
     note_id: Annotated[JoplinIdType, Field(description="Note ID to edit")],

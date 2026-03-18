@@ -1424,3 +1424,115 @@ class TestGetAllNotesSorting:
         call_kwargs = mock_client.get_all_notes.call_args[1]
         assert call_kwargs["order_by"] == "title"
         assert call_kwargs["order_dir"] == "ASC"
+
+
+# === Tests for move_note tool ===
+
+
+class TestMoveNoteTool:
+    """Tests for move_note tool."""
+
+    @pytest.mark.asyncio
+    @patch("joplin_mcp.tools.notes._clear_note_cache")
+    @patch("joplin_mcp.tools.notes.get_joplin_client")
+    @patch("joplin_mcp.tools.notes._compute_notebook_path")
+    @patch("joplin_mcp.tools.notes.get_notebook_map_cached")
+    @patch("joplin_mcp.tools.notes.get_notebook_id_by_name")
+    async def test_moves_note_to_notebook(
+        self,
+        mock_get_folder_id,
+        mock_get_map,
+        mock_compute_path,
+        mock_get_client,
+        mock_clear_cache,
+    ):
+        """Should move a note to the target notebook."""
+        from joplin_mcp.tools.notes import move_note
+
+        mock_get_folder_id.return_value = "folder_id_abc"
+        mock_get_map.return_value = {"folder_id_abc": {"title": "Work", "parent_id": None}}
+        mock_compute_path.return_value = "Work"
+
+        mock_note = MagicMock()
+        mock_note.title = "My Note"
+        mock_client = MagicMock()
+        mock_client.get_note.return_value = mock_note
+        mock_get_client.return_value = mock_client
+
+        fn = _get_tool_fn(move_note)
+        result = await fn(
+            note_id="12345678901234567890123456789012",
+            notebook_name="Work",
+        )
+
+        mock_get_folder_id.assert_called_once_with("Work")
+        mock_client.get_note.assert_called_once_with(
+            "12345678901234567890123456789012", fields="id,title"
+        )
+        mock_client.modify_note.assert_called_once_with(
+            "12345678901234567890123456789012", parent_id="folder_id_abc"
+        )
+        mock_clear_cache.assert_called_once()
+        assert "MOVE_NOTE" in result
+        assert "SUCCESS" in result
+        assert "My Note" in result
+        assert "Work" in result
+        assert "folder_id_abc" in result
+
+    @pytest.mark.asyncio
+    @patch("joplin_mcp.tools.notes._clear_note_cache")
+    @patch("joplin_mcp.tools.notes.get_joplin_client")
+    @patch("joplin_mcp.tools.notes._compute_notebook_path")
+    @patch("joplin_mcp.tools.notes.get_notebook_map_cached")
+    @patch("joplin_mcp.tools.notes.get_notebook_id_by_name")
+    async def test_moves_note_to_nested_notebook(
+        self,
+        mock_get_folder_id,
+        mock_get_map,
+        mock_compute_path,
+        mock_get_client,
+        mock_clear_cache,
+    ):
+        """Should resolve and move to a nested notebook path."""
+        from joplin_mcp.tools.notes import move_note
+
+        mock_get_folder_id.return_value = "nested_folder_id"
+        mock_get_map.return_value = {
+            "parent_id": {"title": "Projects", "parent_id": None},
+            "nested_folder_id": {"title": "Active", "parent_id": "parent_id"},
+        }
+        mock_compute_path.return_value = "Projects/Active"
+
+        mock_note = MagicMock()
+        mock_note.title = "Project Note"
+        mock_client = MagicMock()
+        mock_client.get_note.return_value = mock_note
+        mock_get_client.return_value = mock_client
+
+        fn = _get_tool_fn(move_note)
+        result = await fn(
+            note_id="abcdef1234567890abcdef1234567890",
+            notebook_name="Projects/Active",
+        )
+
+        mock_get_folder_id.assert_called_once_with("Projects/Active")
+        mock_client.modify_note.assert_called_once_with(
+            "abcdef1234567890abcdef1234567890", parent_id="nested_folder_id"
+        )
+        assert "Projects/Active" in result
+        assert "nested_folder_id" in result
+
+    @pytest.mark.asyncio
+    @patch("joplin_mcp.tools.notes.get_notebook_id_by_name")
+    async def test_raises_on_unknown_notebook(self, mock_get_folder_id):
+        """Should propagate ValueError when notebook not found."""
+        from joplin_mcp.tools.notes import move_note
+
+        mock_get_folder_id.side_effect = ValueError("Notebook 'NoSuchFolder' not found")
+
+        fn = _get_tool_fn(move_note)
+        with pytest.raises(ValueError, match="not found"):
+            await fn(
+                note_id="12345678901234567890123456789012",
+                notebook_name="NoSuchFolder",
+            )
