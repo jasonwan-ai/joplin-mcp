@@ -13,6 +13,7 @@
 
 services:
   joplin-mcp:
+    container_name: joplin-mcp
     build: .
     restart: unless-stopped
     ports:

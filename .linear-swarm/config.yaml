@@ -1,0 +1,13 @@
+plan_tier: "pro"
+
+autonomy:
+  default_level: "semi-auto"
+
+git:
+  target_branch: "main"
+
+linear:
+  project: "Joplin Integration"
+  trigger_state: "Backlog"
+  in_progress_state: "In Progress"
+  done_state: "Done"

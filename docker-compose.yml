@@ -5,6 +5,7 @@
 
 services:
   joplin-mcp:
+    container_name: joplin-mcp
     build: .
     ports:
       - "8000:8000"

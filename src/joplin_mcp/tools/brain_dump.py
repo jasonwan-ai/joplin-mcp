@@ -197,3 +197,44 @@ async def create_and_embed_note(
         pass  # Cron sync will recover via updated_time
 
     return f"Created note '{title}' in '{folder_path}' (ID: {note_id})"
+
+
+@create_tool("reindex_note", "Re-embed a note in the vector store")
+async def reindex_note(
+    note_id: Annotated[str, Field(description="Joplin note ID to re-index")],
+) -> str:
+    """Re-embed an existing Joplin note in Qdrant after its content has been updated.
+
+    Fetches the note's current title, body, and parent folder from Joplin,
+    then upserts the fresh embedding into Qdrant. Use this after updating a
+    note via the REST API (PUT /notes/:id) to keep the vector index in sync.
+    """
+    try:
+        note = _joplin_get(f"/notes/{note_id}", fields="id,title,body,parent_id,updated_time")
+    except Exception as exc:
+        return f"Error: Could not fetch note {note_id}: {exc}"
+
+    title = note.get("title", "")
+    body = note.get("body", "")
+    parent_id = note.get("parent_id", "")
+    updated_time = note.get("updated_time", int(time.time() * 1000))
+
+    # Resolve folder path
+    notebooks = _get_all_notebooks()
+    path_map = _build_path_map(notebooks)
+    folder_path, folder_id = path_map.get(parent_id, ("Unknown", parent_id))
+
+    try:
+        service = get_vector_service()
+        service.upsert_note(
+            note_id=note_id,
+            title=title,
+            body=body,
+            folder_path=folder_path,
+            folder_id=folder_id,
+            updated_time=updated_time,
+        )
+    except Exception as exc:
+        return f"Error: Note exists but Qdrant upsert failed: {exc}"
+
+    return f"Re-indexed '{title}' (ID: {note_id}) in folder '{folder_path}'"

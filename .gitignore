@@ -1,6 +1,8 @@
 .*
 !.dockerignore
 !.claude-plugin/
+!.linear-swarm/
+.linear-swarm-worktrees/
 !.env.example
 
 

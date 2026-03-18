@@ -1,0 +1,33 @@
+project:
+  name: "joplin-mcp"
+  description: "Model Context Protocol (MCP) server for Joplin — exposes note CRUD, semantic search (Qdrant+Ollama), vector embedding, and brain-dump workflows via FastMCP over SSE."
+  primary_language: python
+  test_command: "uv run pytest tests/ -x -q"
+  lint_command: "uv run ruff check src/ && uv run black --check src/"
+
+services:
+  - name: mcp-server
+    path: src/joplin_mcp/
+    language: python
+    test_command: "uv run pytest tests/ -x -q"
+    description: "FastMCP server exposing Joplin tools — notes, notebooks, tags, brain_dump, vector search"
+    owners: []
+
+  - name: tools
+    path: src/joplin_mcp/tools/
+    language: python
+    description: "Individual MCP tool modules: notes.py, notebooks.py, tags.py, brain_dump.py"
+    test_command: "uv run pytest tests/test_tools_*.py -x -q"
+    owners: []
+
+  - name: vector
+    path: src/joplin_mcp/vector/
+    language: python
+    description: "Vector search stack: qdrant_client.py, ollama_client.py, vector_service.py"
+    owners: []
+
+  - name: imports
+    path: src/joplin_mcp/imports/
+    language: python
+    description: "Note import framework with pluggable importers"
+    owners: []
