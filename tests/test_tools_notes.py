@@ -1536,3 +1536,121 @@ class TestMoveNoteTool:
                 note_id="12345678901234567890123456789012",
                 notebook_name="NoSuchFolder",
             )
+
+
+# === Tests for get_notes_batch tool ===
+
+
+class TestGetNotesBatch:
+    """Tests for get_notes_batch tool."""
+
+    @pytest.mark.asyncio
+    @patch("joplin_mcp.tools.notes.format_note_details")
+    @patch("joplin_mcp.tools.notes.get_joplin_client")
+    async def test_fetches_multiple_notes(self, mock_get_client, mock_format):
+        """Should return both notes with separator between them."""
+        from joplin_mcp.tools.notes import get_notes_batch
+
+        note1 = MagicMock()
+        note1.body = "Body 1"
+        note2 = MagicMock()
+        note2.body = "Body 2"
+
+        mock_client = MagicMock()
+        mock_client.get_note.side_effect = [note1, note2]
+        mock_get_client.return_value = mock_client
+        mock_format.side_effect = ["NOTE_RESULT_1", "NOTE_RESULT_2"]
+
+        fn = _get_tool_fn(get_notes_batch)
+        result = await fn(
+            note_ids=["12345678901234567890123456789012", "abcdef1234567890abcdef1234567890"]
+        )
+
+        assert "BATCH: 2 notes requested, 2 found" in result
+        assert "NOTE_RESULT_1" in result
+        assert "NOTE_RESULT_2" in result
+        assert "\n---\n" in result
+
+    @pytest.mark.asyncio
+    @patch("joplin_mcp.tools.notes.format_note_details")
+    @patch("joplin_mcp.tools.notes.get_joplin_client")
+    async def test_handles_missing_note(self, mock_get_client, mock_format):
+        """Should include error entry for failed note without failing entire call."""
+        from joplin_mcp.tools.notes import get_notes_batch
+
+        note1 = MagicMock()
+        note1.body = "Body 1"
+
+        mock_client = MagicMock()
+        mock_client.get_note.side_effect = [note1, Exception("Note not found")]
+        mock_get_client.return_value = mock_client
+        mock_format.return_value = "NOTE_RESULT_1"
+
+        fn = _get_tool_fn(get_notes_batch)
+        result = await fn(
+            note_ids=["12345678901234567890123456789012", "abcdef1234567890abcdef1234567890"]
+        )
+
+        assert "BATCH: 2 notes requested, 1 found" in result
+        assert "NOTE_RESULT_1" in result
+        assert "STATUS: ERROR" in result
+        assert "Note not found" in result
+
+    @pytest.mark.asyncio
+    @patch("joplin_mcp.tools.notes._handle_toc_display")
+    @patch("joplin_mcp.tools.notes.get_joplin_client")
+    async def test_toc_only_param(self, mock_get_client, mock_handle_toc):
+        """Should use _handle_toc_display path when toc_only=True."""
+        from joplin_mcp.tools.notes import get_notes_batch
+
+        note = MagicMock()
+        note.body = "# Section\nContent"
+
+        mock_client = MagicMock()
+        mock_client.get_note.return_value = note
+        mock_get_client.return_value = mock_client
+        mock_handle_toc.return_value = "TOC_RESULT"
+
+        fn = _get_tool_fn(get_notes_batch)
+        result = await fn(
+            note_ids=["12345678901234567890123456789012"],
+            toc_only=True,
+        )
+
+        mock_handle_toc.assert_called_once()
+        assert "TOC_RESULT" in result
+
+    @pytest.mark.asyncio
+    @patch("joplin_mcp.tools.notes._handle_section_extraction")
+    @patch("joplin_mcp.tools.notes.get_joplin_client")
+    async def test_section_param(self, mock_get_client, mock_handle_section):
+        """Should use _handle_section_extraction path when section is provided."""
+        from joplin_mcp.tools.notes import get_notes_batch
+
+        note = MagicMock()
+        note.body = "# Summary\nContent"
+
+        mock_client = MagicMock()
+        mock_client.get_note.return_value = note
+        mock_get_client.return_value = mock_client
+        mock_handle_section.return_value = "SECTION_RESULT"
+
+        fn = _get_tool_fn(get_notes_batch)
+        result = await fn(
+            note_ids=["12345678901234567890123456789012"],
+            section="Summary",
+        )
+
+        mock_handle_section.assert_called_once()
+        assert "SECTION_RESULT" in result
+
+    @pytest.mark.asyncio
+    async def test_empty_list(self):
+        """Should return appropriate message for empty note_ids."""
+        from joplin_mcp.tools.notes import get_notes_batch
+
+        fn = _get_tool_fn(get_notes_batch)
+        result = await fn(note_ids=[])
+
+        assert "0 notes requested" in result
+        assert "0 found" in result
