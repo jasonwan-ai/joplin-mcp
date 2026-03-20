@@ -460,6 +460,74 @@ async def get_note(
     return format_note_details(note, include_body, "individual_notes")
 
 
+@create_tool("get_notes_batch", "Get notes batch")
+async def get_notes_batch(
+    note_ids: Annotated[List[str], Field(description="List of note IDs to fetch")],
+    section: Annotated[
+        Optional[str],
+        Field(description="Extract specific section from all notes"),
+    ] = None,
+    toc_only: Annotated[
+        OptionalBoolType,
+        Field(description="Show only table of contents for all notes (default: False)"),
+    ] = False,
+) -> str:
+    """Fetch multiple notes by ID in a single call.
+
+    Retrieves each note by ID and returns their contents combined. If a note is not
+    found or an error occurs, that note's entry includes an error field rather than
+    failing the whole call.
+
+    Args:
+        note_ids: List of note identifiers to retrieve
+        section: Extract the same section heading from all notes
+        toc_only: Show only TOC and metadata for all notes
+
+    Examples:
+        get_notes_batch(["id1", "id2"]) - Fetch two notes
+        get_notes_batch(["id1", "id2"], section="Summary") - Extract same section from each
+        get_notes_batch(["id1", "id2"], toc_only=True) - TOC-only view of each note
+    """
+    toc_only = flexible_bool_converter(toc_only)
+
+    if not note_ids:
+        return "BATCH: 0 notes requested, 0 found\n\nNo note IDs provided."
+
+    client = get_joplin_client()
+
+    results = []
+    success_count = 0
+
+    for note_id in note_ids:
+        try:
+            validated_id = validate_joplin_id(note_id)
+        except ValueError as e:
+            results.append(f"NOTE_ID: {note_id}\nSTATUS: ERROR\nERROR: {e}\n")
+            continue
+
+        try:
+            note = client.get_note(validated_id, fields=COMMON_NOTE_FIELDS)
+
+            if section:
+                entry = _handle_section_extraction(note, section, validated_id, True)
+                if entry is None:
+                    entry = format_note_details(note, True, "individual_notes")
+            elif toc_only:
+                body = getattr(note, "body", "")
+                entry = _handle_toc_display(note, validated_id, "toc_only", body) if body else format_note_details(note, True, "individual_notes")
+            else:
+                entry = format_note_details(note, True, "individual_notes")
+
+            success_count += 1
+            results.append(entry)
+        except Exception as e:
+            results.append(f"NOTE_ID: {note_id}\nSTATUS: ERROR\nERROR: {e}\n")
+
+    combined = "\n---\n".join(results)
+    header = f"BATCH: {len(note_ids)} notes requested, {success_count} found\n\n"
+    return header + combined
+
+
 @create_tool("get_links", "Get links")
 async def get_links(
     note_id: Annotated[
