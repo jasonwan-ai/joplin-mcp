@@ -621,6 +621,27 @@ class TestUpdateNoteTool:
         assert "UPDATE_NOTE" in result
         assert "SUCCESS" in result
 
+    @pytest.mark.asyncio
+    @patch("joplin_mcp.tools.notes.get_joplin_client")
+    async def test_updates_parent_id(self, mock_get_client):
+        """Should move note to a different notebook via parent_id."""
+        from joplin_mcp.tools.notes import update_note
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        notebook_id = "abcdef1234567890abcdef1234567890"
+        result = await update_note.fn(
+            "12345678901234567890123456789012",
+            parent_id=notebook_id,
+        )
+
+        mock_client.modify_note.assert_called_once()
+        call_args = mock_client.modify_note.call_args
+        assert call_args[1]["parent_id"] == notebook_id
+        assert "UPDATE_NOTE" in result
+        assert "SUCCESS" in result
+
 
 def _get_tool_fn(tool):
     """Get the underlying function from a tool (handles both wrapped and unwrapped)."""
