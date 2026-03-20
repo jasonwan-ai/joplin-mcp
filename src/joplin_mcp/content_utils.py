@@ -573,6 +573,122 @@ def format_timestamp(
         return None
 
 
+def _find_target_heading(
+    headings: List[Dict[str, Any]], section_identifier: str
+) -> Optional[Dict[str, Any]]:
+    """Find a heading matching section_identifier. Priority: number > exact > slug > partial."""
+    if not headings or not section_identifier:
+        return None
+
+    identifier_lower = section_identifier.lower().strip()
+
+    # Priority 1: section number
+    try:
+        section_num = int(section_identifier)
+        if 1 <= section_num <= len(headings):
+            return headings[section_num - 1]
+    except ValueError:
+        pass
+
+    # Priority 2: exact match (case insensitive)
+    for heading in headings:
+        if heading["title"].lower() == identifier_lower:
+            return heading
+
+    # Priority 3: slug match
+    identifier_slug = re.sub(r"[^\w\s-]", "", identifier_lower)
+    identifier_slug = re.sub(r"[-\s_]+", "-", identifier_slug).strip("-")
+    for heading in headings:
+        title_lower = heading["title"].lower()
+        title_slug = re.sub(r"[^\w\s-]", "", title_lower)
+        title_slug = re.sub(r"[-\s]+", "-", title_slug).strip("-")
+        if title_slug == identifier_slug:
+            return heading
+
+    # Priority 4: partial match
+    for heading in headings:
+        if identifier_lower in heading["title"].lower():
+            return heading
+
+    return None
+
+
+def _get_section_bounds(
+    headings: List[Dict[str, Any]], target_heading: Dict[str, Any], total_lines: int
+) -> tuple[int, int]:
+    """Return (start_line, end_line) for a section. end_line is exclusive."""
+    start_line = target_heading["line_idx"]
+    end_line = total_lines
+    target_level = target_heading["level"]
+    for heading in headings:
+        if heading["line_idx"] > start_line and heading["level"] <= target_level:
+            end_line = heading["line_idx"]
+            break
+    return start_line, end_line
+
+
+def insert_into_section(
+    body: str,
+    section_identifier: str,
+    new_string: str,
+    position: Optional[str] = None,
+    old_string: Optional[str] = None,
+) -> tuple[str, str]:
+    """Insert or replace content within a named markdown section.
+
+    Args:
+        body: Note markdown content
+        section_identifier: Heading text (or number) to target
+        new_string: Text to insert or replacement text
+        position: 'beginning' (right after heading) or 'end' (before next heading/EOF)
+        old_string: If provided, replace this text within the section
+
+    Returns:
+        tuple: (new_body, section_title)
+
+    Raises:
+        ValueError: If section not found or old_string not found in section
+    """
+    if not body:
+        raise ValueError("Note body is empty")
+
+    headings = parse_markdown_headings(body)
+    if not headings:
+        raise ValueError("No headings found in note — cannot target a section")
+
+    target_heading = _find_target_heading(headings, section_identifier)
+    if not target_heading:
+        available = "\n".join(f"  - {h['title']}" for h in headings)
+        raise ValueError(
+            f"Section '{section_identifier}' not found in note.\n"
+            f"Available sections:\n{available}"
+        )
+
+    lines = body.split("\n")
+    start_line, end_line = _get_section_bounds(headings, target_heading, len(lines))
+    section_title = target_heading["title"]
+
+    if position == "end":
+        lines.insert(end_line, new_string)
+        return "\n".join(lines), section_title
+    elif position == "beginning":
+        lines.insert(start_line + 1, new_string)
+        return "\n".join(lines), section_title
+    else:
+        # old_string replacement within section
+        section_text = "\n".join(lines[start_line:end_line])
+        if old_string not in section_text:
+            preview = section_text[:200] + ("..." if len(section_text) > 200 else "")
+            raise ValueError(
+                f"old_string not found in section '{section_title}'. "
+                f"Section content preview: {preview}"
+            )
+        new_section_text = section_text.replace(old_string, new_string, 1)
+        new_section_lines = new_section_text.split("\n")
+        lines[start_line:end_line] = new_section_lines
+        return "\n".join(lines), section_title
+
+
 def calculate_content_stats(body: str) -> Dict[str, int]:
     """Calculate content statistics for a note body.
 

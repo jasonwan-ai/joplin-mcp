@@ -39,6 +39,7 @@ from joplin_mcp.content_utils import (
     create_content_preview,
     create_toc_only,
     extract_section_content,
+    insert_into_section,
     parse_markdown_headings,
 )
 from joplin_mcp.fastmcp_server import (
@@ -922,6 +923,10 @@ async def edit_note(
         Optional[str],
         Field(description="Insert position: 'beginning' or 'end' (only when old_string is None)"),
     ] = None,
+    section: Annotated[
+        Optional[str],
+        Field(description="Target section heading — scopes the edit to within that section"),
+    ] = None,
 ) -> str:
     """Precision-edit a note's body without reading or replacing the full content.
 
@@ -934,6 +939,9 @@ async def edit_note(
     - Delete: provide old_string and set new_string to '' to remove text.
     - Append: set position='end' (old_string must be None) to append new_string.
     - Prepend: set position='beginning' (old_string must be None) to prepend new_string.
+    - Section insert end: set section + position='end' to insert before next heading.
+    - Section insert beginning: set section + position='beginning' to insert after heading line.
+    - Section replace: set section + old_string to replace within the section only.
 
     Args:
         note_id: Note identifier
@@ -941,6 +949,7 @@ async def edit_note(
         old_string: Text to find (None for positional insert)
         replace_all: Replace all occurrences when True (default: first unique match)
         position: 'beginning' or 'end' (only when old_string is None)
+        section: Heading text to target — scopes the edit to within that section
 
     Examples:
         edit_note("id", new_string="colour", old_string="color") - Replace unique match
@@ -948,6 +957,8 @@ async def edit_note(
         edit_note("id", new_string="", old_string="delete me") - Delete text
         edit_note("id", new_string="appended text", position="end") - Append
         edit_note("id", new_string="prepended text", position="beginning") - Prepend
+        edit_note("id", new_string="- [ ] task", section="Today", position="end") - Section insert
+        edit_note("id", old_string="foo", new_string="bar", section="Section A") - Section replace
     """
     note_id = validate_joplin_id(note_id)
     replace_all = flexible_bool_converter(replace_all) or False
@@ -978,6 +989,19 @@ async def edit_note(
     client = get_joplin_client()
     note = client.get_note(note_id, fields=COMMON_NOTE_FIELDS)
     body = getattr(note, "body", "") or ""
+
+    if section is not None:
+        new_body, section_title = insert_into_section(
+            body, section, new_string, position=position, old_string=old_string
+        )
+        client.modify_note(note_id, body=new_body)
+        _clear_note_cache()
+        if position == "end":
+            return f"EDIT_NOTE: Inserted {len(new_string)} characters at end of section '{section_title}'."
+        elif position == "beginning":
+            return f"EDIT_NOTE: Inserted {len(new_string)} characters at beginning of section '{section_title}'."
+        else:
+            return f"EDIT_NOTE: Replaced text in section '{section_title}'."
 
     if old_string is not None:
         # Replacement / deletion mode

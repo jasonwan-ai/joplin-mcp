@@ -1218,6 +1218,113 @@ class TestEditNoteTool:
 
         mock_clear_cache.assert_called_once()
 
+    @pytest.mark.asyncio
+    @patch("joplin_mcp.tools.notes.get_joplin_client")
+    async def test_section_insert_end(self, mock_get_client):
+        """Should insert at end of section when position='end'."""
+        from joplin_mcp.tools.notes import edit_note
+
+        body = "## 🔴 Today\n- [ ] task1\n\n## 🟡 This Week\n- [ ] queued"
+        note = self._make_note(body)
+        mock_client = MagicMock()
+        mock_client.get_note.return_value = note
+        mock_get_client.return_value = mock_client
+
+        fn = _get_tool_fn(edit_note)
+        result = await fn(
+            "12345678901234567890123456789012",
+            new_string="- [ ] new task",
+            section="🔴 Today",
+            position="end",
+        )
+
+        call_kwargs = mock_client.modify_note.call_args[1]
+        new_body = call_kwargs["body"]
+        lines = new_body.split("\n")
+        # new task should appear before "## 🟡 This Week"
+        today_idx = lines.index("## 🔴 Today")
+        next_heading_idx = lines.index("## 🟡 This Week")
+        new_task_idx = lines.index("- [ ] new task")
+        assert today_idx < new_task_idx < next_heading_idx
+        assert "Inserted" in result
+        assert "🔴 Today" in result
+
+    @pytest.mark.asyncio
+    @patch("joplin_mcp.tools.notes.get_joplin_client")
+    async def test_section_insert_beginning(self, mock_get_client):
+        """Should insert right after heading when position='beginning'."""
+        from joplin_mcp.tools.notes import edit_note
+
+        body = "## 🔴 Today\n- [ ] existing\n\n## 🟡 This Week"
+        note = self._make_note(body)
+        mock_client = MagicMock()
+        mock_client.get_note.return_value = note
+        mock_get_client.return_value = mock_client
+
+        fn = _get_tool_fn(edit_note)
+        result = await fn(
+            "12345678901234567890123456789012",
+            new_string="- [ ] urgent",
+            section="🔴 Today",
+            position="beginning",
+        )
+
+        call_kwargs = mock_client.modify_note.call_args[1]
+        new_body = call_kwargs["body"]
+        lines = new_body.split("\n")
+        assert lines[0] == "## 🔴 Today"
+        assert lines[1] == "- [ ] urgent"
+        assert lines[2] == "- [ ] existing"
+        assert "Inserted" in result
+
+    @pytest.mark.asyncio
+    @patch("joplin_mcp.tools.notes.get_joplin_client")
+    async def test_section_replace(self, mock_get_client):
+        """Should replace old_string only within the targeted section."""
+        from joplin_mcp.tools.notes import edit_note
+
+        body = "## Section A\nfoo here\n\n## Section B\nfoo here too"
+        note = self._make_note(body)
+        mock_client = MagicMock()
+        mock_client.get_note.return_value = note
+        mock_get_client.return_value = mock_client
+
+        fn = _get_tool_fn(edit_note)
+        result = await fn(
+            "12345678901234567890123456789012",
+            section="Section A",
+            old_string="foo",
+            new_string="bar",
+        )
+
+        call_kwargs = mock_client.modify_note.call_args[1]
+        new_body = call_kwargs["body"]
+        assert "## Section A\nbar here" in new_body
+        # Section B should be unchanged
+        assert "## Section B\nfoo here too" in new_body
+        assert "Replaced text in section" in result
+
+    @pytest.mark.asyncio
+    @patch("joplin_mcp.tools.notes.get_joplin_client")
+    async def test_section_not_found_raises(self, mock_get_client):
+        """Should raise ValueError listing available sections when section not found."""
+        from joplin_mcp.tools.notes import edit_note
+
+        body = "## Introduction\nsome content\n\n## Conclusion\nthe end"
+        note = self._make_note(body)
+        mock_client = MagicMock()
+        mock_client.get_note.return_value = note
+        mock_get_client.return_value = mock_client
+
+        fn = _get_tool_fn(edit_note)
+        with pytest.raises(ValueError, match="not found"):
+            await fn(
+                "12345678901234567890123456789012",
+                section="Nonexistent Section",
+                new_string="text",
+                position="end",
+            )
+
 
 # === Tests for sorting support ===
 
