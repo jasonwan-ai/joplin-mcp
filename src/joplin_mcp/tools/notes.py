@@ -808,8 +808,12 @@ async def update_note(
         Optional[Union[int, str]],
         Field(description="Due date: Unix timestamp (ms), ISO 8601 string, or 0 to clear. Only for todos.")
     ] = None,
+    parent_id: Annotated[
+        Optional[str],
+        Field(description="Notebook ID to move this note into (optional).")
+    ] = None,
 ) -> str:
-    """Update note properties (title, body, todo status, due date). Replaces the entire body.
+    """Update note properties (title, body, todo status, due date, notebook). Replaces the entire body.
 
     Use this for metadata changes or full body replacement. For targeted text edits
     (fix a word, append a line) use edit_note instead — it doesn't require reading first.
@@ -822,6 +826,7 @@ async def update_note(
         - update_note("note123", body="New content", is_todo=True) - Update content and convert to todo
         - update_note("note123", todo_due="2024-12-31T17:00:00") - Set due date
         - update_note("note123", todo_due=0) - Clear due date
+        - update_note("note123", parent_id="abc123...") - Move note to a different notebook
     """
 
     # Runtime validation for Jan AI compatibility while preserving functionality
@@ -840,6 +845,8 @@ async def update_note(
         update_data["todo_completed"] = 1 if todo_completed else 0
     if todo_due is not None:
         update_data["todo_due"] = timestamp_converter(todo_due, "todo_due") or 0
+    if parent_id is not None:
+        update_data["parent_id"] = validate_joplin_id(parent_id)
 
     if not update_data:
         raise ValueError("At least one field must be provided for update")

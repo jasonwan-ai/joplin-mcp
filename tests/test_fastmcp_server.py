@@ -224,6 +224,23 @@ async def test_update_note_has_todo_due_param():
             pytest.fail("update_note tool not found")
 
 
+@pytest.mark.asyncio
+async def test_update_note_has_parent_id_param():
+    """Test that update_note tool schema includes parent_id parameter."""
+    async with Client(mcp) as client:
+        tools = await client.list_tools()
+        for tool in tools:
+            if tool.name == "update_note":
+                schema = tool.inputSchema
+                assert schema and "properties" in schema
+                properties = schema["properties"]
+                assert "parent_id" in properties, "update_note should have parent_id parameter"
+                assert "description" in properties["parent_id"]
+                break
+        else:
+            pytest.fail("update_note tool not found")
+
+
 # === Tests for path-based notebook resolution ===
 
 
