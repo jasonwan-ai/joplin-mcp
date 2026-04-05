@@ -1062,13 +1062,7 @@ async def health_check(request) -> dict:
 
 @create_tool("ping_joplin", "Ping Joplin")
 async def ping_joplin() -> str:
-    """Test connection to Joplin server.
-
-    Verifies connectivity to the Joplin application. Use to troubleshoot connection issues.
-
-    Returns:
-        str: Connection status information.
-    """
+    """Test connection to Joplin server."""
     try:
         client = get_joplin_client()
         client.ping()

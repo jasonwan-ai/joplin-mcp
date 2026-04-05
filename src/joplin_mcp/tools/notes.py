@@ -83,6 +83,7 @@ from joplin_mcp.formatting import (
     format_find_in_note_summary,
     format_note_metadata_lines,
 )
+from joplin_mcp.vector.sync import try_delete_from_index, try_sync_note
 
 
 # === NOTE HELPER FUNCTIONS ===
@@ -372,28 +373,7 @@ async def get_note(
         Field(description="Show only metadata without content (default: False)"),
     ] = False,
 ) -> str:
-    """Retrieve a note with smart content display and sequential reading support.
-
-    Smart behavior: Short notes show full content, long notes show TOC only.
-    Sequential reading: Extract specific line ranges for progressive consumption.
-
-    Args:
-        note_id: Note identifier
-        section: Extract specific section (heading text, slug, or number)
-        start_line: Start line for sequential reading (1-based, line numbers)
-        line_count: Number of lines to extract (default: 50 if start_line specified)
-        toc_only: Show only TOC and metadata
-        force_full: Force full content even for long notes
-        metadata_only: Show only metadata without content
-
-    Examples:
-        get_note("id") - Smart display (full if short, TOC if long)
-        get_note("id", section="1") - Get first section
-        get_note("id", start_line=1) - Start sequential reading from line 1 (50 lines)
-        get_note("id", start_line=51, line_count=30) - Continue reading from line 51 (30 lines)
-        get_note("id", toc_only=True) - TOC only
-        get_note("id", force_full=True) - Force full content
-    """
+    """Short notes: full content. Long notes: TOC only. Use start_line for sequential reading."""
 
     # Runtime validation for Jan AI compatibility while preserving functionality
     note_id = validate_joplin_id(note_id)
@@ -473,22 +453,7 @@ async def get_notes_batch(
         Field(description="Show only table of contents for all notes (default: False)"),
     ] = False,
 ) -> str:
-    """Fetch multiple notes by ID in a single call.
-
-    Retrieves each note by ID and returns their contents combined. If a note is not
-    found or an error occurs, that note's entry includes an error field rather than
-    failing the whole call.
-
-    Args:
-        note_ids: List of note identifiers to retrieve
-        section: Extract the same section heading from all notes
-        toc_only: Show only TOC and metadata for all notes
-
-    Examples:
-        get_notes_batch(["id1", "id2"]) - Fetch two notes
-        get_notes_batch(["id1", "id2"], section="Summary") - Extract same section from each
-        get_notes_batch(["id1", "id2"], toc_only=True) - TOC-only view of each note
-    """
+    """Fetch multiple notes by ID. Returns each note's content or an error entry if not found."""
     toc_only = flexible_bool_converter(toc_only)
 
     if not note_ids:
@@ -535,19 +500,7 @@ async def get_links(
         JoplinIdType, Field(description="Note ID to extract links from")
     ],
 ) -> str:
-    """Extract all links to other notes from a given note and find backlinks from other notes.
-
-    Scans the note's content for links in the format [text](:/noteId) or [text](:/noteId#section-slug)
-    and searches for backlinks (other notes that link to this note). Returns link text, target/source
-    note info, section slugs (if present), and line context.
-
-    Returns:
-        str: Formatted list of outgoing links and backlinks with titles, IDs, section slugs, and line context.
-
-    Link formats:
-    - [link text](:/targetNoteId) - Link to note
-    - [link text](:/targetNoteId#section-slug) - Link to specific section in note
-    """
+    """Returns outgoing :/noteId links and backlinks (other notes linking here), grouped separately."""
     import re
 
     # Runtime validation for Jan AI compatibility while preserving functionality
@@ -752,24 +705,7 @@ async def create_note(
         Field(description="Due date: Unix timestamp (ms) or ISO 8601 string (e.g., '2024-12-31T17:00:00'). Only for todos.")
     ] = None,
 ) -> str:
-    """Create a new note in a specified notebook in Joplin.
-
-    Creates a new note with the specified title, content, and properties. Uses notebook name
-    for easier identification instead of requiring notebook IDs.
-
-    Notebook can be specified by name or path:
-    - "Work" - matches notebook named "Work" (must be unique)
-    - "Projects/Work" - matches "Work" notebook inside "Projects"
-
-    Returns:
-        str: Success message with the created note's title and unique ID.
-
-    Examples:
-        - create_note("Shopping List", "Personal Notes", "- Milk\n- Eggs", True, False) - Create uncompleted todo
-        - create_note("Meeting Notes", "Work Projects", "# Meeting with Client") - Create regular note
-        - create_note("Task", "Work", "", True, False, "2024-12-31T17:00:00") - Create todo with due date
-        - create_note("Task", "Project A/tasks", "body") - Create note in "tasks" sub-notebook under "Project A"
-    """
+    """Create a note. notebook_name accepts a name or path (e.g. 'Projects/Work')."""
 
     # Runtime validation for Jan AI compatibility while preserving functionality
     is_todo = flexible_bool_converter(is_todo)
@@ -791,7 +727,9 @@ async def create_note(
         note_kwargs["todo_due"] = todo_due_ms
 
     note = client.add_note(**note_kwargs)
-    return format_creation_success(ItemType.note, title, str(note))
+    note_id = str(note)
+    try_sync_note(note_id)
+    return format_creation_success(ItemType.note, title, note_id)
 
 
 @create_tool("update_note", "Update note")
@@ -814,21 +752,7 @@ async def update_note(
         Field(description="Notebook ID to move this note into (optional).")
     ] = None,
 ) -> str:
-    """Update note properties (title, body, todo status, due date, notebook). Replaces the entire body.
-
-    Use this for metadata changes or full body replacement. For targeted text edits
-    (fix a word, append a line) use edit_note instead — it doesn't require reading first.
-
-    Returns:
-        str: Success message confirming the note was updated.
-
-    Examples:
-        - update_note("note123", title="New Title") - Update only the title
-        - update_note("note123", body="New content", is_todo=True) - Update content and convert to todo
-        - update_note("note123", todo_due="2024-12-31T17:00:00") - Set due date
-        - update_note("note123", todo_due=0) - Clear due date
-        - update_note("note123", parent_id="abc123...") - Move note to a different notebook
-    """
+    """Replaces entire body. For targeted edits (append/replace text), use edit_note instead."""
 
     # Runtime validation for Jan AI compatibility while preserving functionality
     note_id = validate_joplin_id(note_id)
@@ -855,7 +779,7 @@ async def update_note(
     client = get_joplin_client()
     client.modify_note(note_id, **update_data)
     _clear_note_cache()
-
+    try_sync_note(note_id)
     return format_update_success(ItemType.note, note_id)
 
 
@@ -874,21 +798,7 @@ async def move_note(
         ),
     ],
 ) -> str:
-    """Move a note to a different notebook/folder.
-
-    Resolves the destination notebook by name or hierarchical path, then moves
-    the note by updating its parent folder.
-
-    Returns:
-        str: Confirmation with note title and destination folder path.
-
-    Raises:
-        ValueError: If the destination notebook is not found.
-
-    Examples:
-        - move_note("note_id_123", "Work") - Move to top-level 'Work' notebook
-        - move_note("note_id_123", "Projects/Active") - Move to nested notebook
-    """
+    """Move a note to a notebook by name or path (e.g. 'Projects/Active')."""
     folder_id = get_notebook_id_by_name(notebook_name)
     nb_map = get_notebook_map_cached()
     full_path = _compute_notebook_path(folder_id, nb_map)
@@ -897,7 +807,7 @@ async def move_note(
     note = client.get_note(note_id, fields="id,title")
     client.modify_note(note_id, parent_id=folder_id)
     _clear_note_cache()
-
+    try_sync_note(note_id)
     return (
         f"MOVE_NOTE: SUCCESS\n"
         f"  Note:        {note.title}\n"
@@ -928,37 +838,10 @@ async def edit_note(
         Field(description="Target section heading — scopes the edit to within that section"),
     ] = None,
 ) -> str:
-    """Precision-edit a note's body without reading or replacing the full content.
+    """Targeted body edit without a full read/replace round-trip.
 
-    Preferred over update_note for targeted text changes — no get_note round-trip needed.
-    Use update_note instead when changing metadata (title, todo status, due date) or
-    replacing the entire body.
-
-    Modes:
-    - Replace: provide old_string and new_string to replace text in the note body.
-    - Delete: provide old_string and set new_string to '' to remove text.
-    - Append: set position='end' (old_string must be None) to append new_string.
-    - Prepend: set position='beginning' (old_string must be None) to prepend new_string.
-    - Section insert end: set section + position='end' to insert before next heading.
-    - Section insert beginning: set section + position='beginning' to insert after heading line.
-    - Section replace: set section + old_string to replace within the section only.
-
-    Args:
-        note_id: Note identifier
-        new_string: Replacement or insertion text (use '' to delete matches)
-        old_string: Text to find (None for positional insert)
-        replace_all: Replace all occurrences when True (default: first unique match)
-        position: 'beginning' or 'end' (only when old_string is None)
-        section: Heading text to target — scopes the edit to within that section
-
-    Examples:
-        edit_note("id", new_string="colour", old_string="color") - Replace unique match
-        edit_note("id", new_string="colour", old_string="color", replace_all=True) - Replace all
-        edit_note("id", new_string="", old_string="delete me") - Delete text
-        edit_note("id", new_string="appended text", position="end") - Append
-        edit_note("id", new_string="prepended text", position="beginning") - Prepend
-        edit_note("id", new_string="- [ ] task", section="Today", position="end") - Section insert
-        edit_note("id", old_string="foo", new_string="bar", section="Section A") - Section replace
+    Modes: replace (old+new), delete (old+new=''), append (position='end'), prepend (position='beginning').
+    Add section= to scope any mode to within a specific heading.
     """
     note_id = validate_joplin_id(note_id)
     replace_all = flexible_bool_converter(replace_all) or False
@@ -996,6 +879,7 @@ async def edit_note(
         )
         client.modify_note(note_id, body=new_body)
         _clear_note_cache()
+        try_sync_note(note_id)
         if position == "end":
             return f"EDIT_NOTE: Inserted {len(new_string)} characters at end of section '{section_title}'."
         elif position == "beginning":
@@ -1031,6 +915,7 @@ async def edit_note(
 
         client.modify_note(note_id, body=new_body)
         _clear_note_cache()
+        try_sync_note(note_id)
 
         if new_string == "":
             return f"EDIT_NOTE: Deleted {replacements} occurrence(s) of the specified text."
@@ -1047,6 +932,7 @@ async def edit_note(
 
         client.modify_note(note_id, body=new_body)
         _clear_note_cache()
+        try_sync_note(note_id)
 
         return f"EDIT_NOTE: {action} {len(new_string)} characters."
 
@@ -1055,24 +941,14 @@ async def edit_note(
 async def delete_note(
     note_id: Annotated[JoplinIdType, Field(description="Note ID to delete")],
 ) -> str:
-    """Delete a note from Joplin.
-
-    Permanently removes a note from Joplin. This action cannot be undone.
-
-    Returns:
-        str: Success message confirming the note was deleted.
-
-    Warning: This action is permanent and cannot be undone.
-    """
+    """Permanent, cannot be undone."""
     # Runtime validation for Jan AI compatibility while preserving functionality
     note_id = validate_joplin_id(note_id)
 
     client = get_joplin_client()
     client.delete_note(note_id)
-
-    # Invalidate cache for deleted note
     _clear_note_cache()
-
+    try_delete_from_index(note_id)
     return format_delete_success(ItemType.note, note_id)
 
 
@@ -1101,18 +977,7 @@ async def find_notes(
         Field(description='Sort direction: "asc", "desc" (default: asc for title, desc for time fields)'),
     ] = None,
 ) -> str:
-    """Find notes by searching titles and content. Use "*" to list all notes.
-
-    Query syntax: "exact phrase", title:word, body:word, -exclude, word1 OR word2
-
-    Examples:
-        - find_notes("*") - List all notes
-        - find_notes("meeting") - Find notes containing "meeting"
-        - find_notes("*", task=True) - List all tasks
-        - find_notes("*", limit=20, offset=20) - Page 2
-
-    TIP: Use find_notes_with_tag() or find_notes_in_notebook() for filtered searches.
-    """
+    """Use "*" to list all. Query syntax: "exact phrase", title:word, body:word, -exclude, OR."""
 
     # Runtime validation for Jan AI compatibility while preserving functionality
     task = flexible_bool_converter(task)
@@ -1222,11 +1087,7 @@ async def find_in_note(
         Field(description="Dot matches newlines (re.DOTALL, default: False)"),
     ] = False,
 ) -> str:
-    """Search for a regex pattern inside a specific note and return paginated matches.
-
-    Multiline mode is enabled by default so anchors like ``^``/``$`` operate per line,
-    matching the common expectations for checklist-style searches.
-    """
+    """Regex search within a note. Multiline on by default (^ and $ match per line)."""
 
     import re
     from bisect import bisect_right
@@ -1451,21 +1312,7 @@ async def find_notes_with_tag(
         Field(description='Sort direction: "asc", "desc" (default: asc for title, desc for time fields)'),
     ] = None,
 ) -> str:
-    """Find all notes that have a specific tag, with pagination support.
-
-    MAIN FUNCTION FOR TAG SEARCHES!
-
-    Use this when you want to find all notes tagged with a specific tag name.
-
-    Returns:
-        str: List of all notes with the specified tag, with pagination information.
-
-    Examples:
-        - find_notes_with_tag("time-slip") - Find all notes tagged with "time-slip"
-        - find_notes_with_tag("work", limit=10, offset=10) - Find notes tagged with "work" (page 2)
-        - find_notes_with_tag("work", task=True) - Find only tasks tagged with "work"
-        - find_notes_with_tag("important", task=True, completed=False) - Find only uncompleted tasks tagged with "important"
-    """
+    """Find notes by tag name (case-insensitive)."""
 
     order_by = flexible_enum_converter(order_by, SortBy, "order_by")
     order_dir = flexible_enum_converter(order_dir, SortOrder, "order_dir")
@@ -1532,26 +1379,7 @@ async def find_notes_in_notebook(
         Field(description='Sort direction: "asc", "desc" (default: asc for title, desc for time fields)'),
     ] = None,
 ) -> str:
-    """Find all notes in a specific notebook, with pagination support.
-
-    MAIN FUNCTION FOR NOTEBOOK SEARCHES!
-
-    Use this when you want to find all notes in a specific notebook.
-
-    Notebook can be specified by name or path:
-    - "Work" - matches notebook named "Work" (must be unique)
-    - "Projects/Work" - matches "Work" notebook inside "Projects"
-
-    Returns:
-        str: List of all notes in the specified notebook, with pagination information.
-
-    Examples:
-        - find_notes_in_notebook("Work Projects") - Find all notes in "Work Projects"
-        - find_notes_in_notebook("Personal Notes", limit=10, offset=10) - Find notes in "Personal Notes" (page 2)
-        - find_notes_in_notebook("Personal Notes", task=True) - Find only tasks in "Personal Notes"
-        - find_notes_in_notebook("Projects", task=True, completed=False) - Find only uncompleted tasks in "Projects"
-        - find_notes_in_notebook("Project A/tasks") - Find notes in "tasks" sub-notebook under "Project A"
-    """
+    """Find notes in a notebook. notebook_name accepts name or path (e.g. 'Projects/Work')."""
 
     # Runtime validation
     task = flexible_bool_converter(task)
@@ -1614,18 +1442,7 @@ async def get_all_notes(
         Field(description='Sort direction: "asc", "desc" (default: asc for title, desc for time fields)'),
     ] = None,
 ) -> str:
-    """Get all notes in your Joplin instance.
-
-    Simple function to retrieve all notes without any filtering or searching.
-    Most recent notes are shown first.
-
-    Returns:
-        str: Formatted list of all notes with title, ID, content preview, and dates.
-
-    Examples:
-        - get_all_notes() - Get the 20 most recent notes
-        - get_all_notes(50) - Get the 50 most recent notes
-    """
+    """Get all notes, most recent first. No offset param — use find_notes("*") for paginated access."""
 
     order_by = flexible_enum_converter(order_by, SortBy, "order_by")
     order_dir = flexible_enum_converter(order_dir, SortOrder, "order_dir")
